@@ -23,6 +23,22 @@ void print_vetor(int *vetor, int tamanho)
     printf("]\n");
 }
 
+void sort(int *vetor, int tamanho)
+{
+    for (int i = 0; i < tamanho - 1; i++)
+    {
+        for (int j = 0; j < tamanho - i - 1; j++)
+        {
+            if (vetor[j] > vetor[j + 1])
+            {
+                int temp = vetor[j];
+                vetor[j] = vetor[j + 1];
+                vetor[j + 1] = temp;
+            }
+        }
+    }
+}
+
 int main(void)
 {
 
@@ -32,17 +48,22 @@ int main(void)
     ler_vetor(vetor, 10);
 
     printf("Valor da variavel de teste: %d\n", x);
+    printf("Vetor desordenado: ");
     print_vetor(vetor, 10);
     pid = fork(); //-> Criação de um novo processo (sub-processo) filho tendo o processo principal como pai.O retorno do fork é o Pid do filho, somente com acesso pelo pai.
     if (pid != 0) // Pai
     {
         // Exercicio 1:
         waitpid(-1, &status, 0);
-        mypid = getppid();
+        mypid = getpid();
         printf("Mypid do pai: %d\n", mypid);
 
         // Exercicio 2:
         printf("Valor da variavel de teste no pai após mod no filho: %d\n", x);
+
+        // Exercicio 3:
+        printf("Vetor ordenado no pai: ");
+        print_vetor(vetor, 10);
     }
     else // Filho
     {
@@ -53,7 +74,14 @@ int main(void)
         // Exericio 2:
         x = 5;
         printf("Valor da variavel de teste no filho: %d\n", x);
-        exit(3);
+
+        // Exericio 3:
+        sort(vetor, 10);
+
+        // Exercicio 4:
+        execlp("echo", "echo", "Alo mundo!", NULL);
+
+        exit(1);
     }
 
     return 0;
