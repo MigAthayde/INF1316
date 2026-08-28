@@ -1,0 +1,517 @@
+MIGUEL DE ATHAYDE CARNEIRO - 2211816
+
+QUESTAO 1) Soma de matrizes
+
+Faca um programa para somar matrizes de acordo com o seguinte algoritmo:
+- O primeiro processo ira criar duas matrizes preenchidas e uma terceira vazia
+  em 3 areas de memoria compartilhada.
+- Para cada linha da matriz solucao, o seu programa devera gerar um processo
+  para o seu calculo.
+OBS: implemente as matrizes como vetores de tamanho (linha x coluna) e aloque
+a shared memory para os vetores correspondentes, pois acessar os elementos
+(i,j) e complexo.
+-----------------------------------------------------
+LAB2_1.C
+#include<stdio.h>
+#include<string.h>
+#include<stdlib.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#define LINHAS 3
+#define COLUNAS 3
+
+int main(void)
+{
+    int segA, segB, segC;
+    int *A, *B, *C;
+    int pid;
+
+    segA = shmget(IPC_PRIVATE, sizeof(int) * LINHAS * COLUNAS, IPC_CREAT | S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
+    segB = shmget(IPC_PRIVATE, sizeof(int) * LINHAS * COLUNAS, IPC_CREAT | S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
+    segC = shmget(IPC_PRIVATE, sizeof(int) * LINHAS * COLUNAS, IPC_CREAT | S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
+
+    A = shmat(segA, 0, 0);
+    B = shmat(segB, 0, 0);
+    C = shmat(segC, 0, 0);
+
+    if (A == (int *) -1 || B == (int *) -1 || C == (int *) -1)
+    {
+        perror("erro ao anexar memoria compartilhada");
+        exit(1);
+    }
+
+    for( int i = 0; i < LINHAS; i++)
+    {
+        for (int j = 0; j < COLUNAS; j++)
+        {
+            A[i * COLUNAS + j] = i + j;
+            B[i * COLUNAS + j] = i - j;
+            C[i * COLUNAS + j] = 0;
+        }
+    }
+
+    for (int i = 0; i < LINHAS; i++)
+    {
+        pid = fork();
+
+        if (pid == 0)
+        {
+            for (int j = 0; j < COLUNAS; j++)
+            {
+                C[i * COLUNAS + j] = A[i * COLUNAS + j] + B[i * COLUNAS + j];
+            }
+            exit(0);
+        }
+    }
+
+    for (int i = 0; i < LINHAS; i++)
+    {
+        wait(NULL);
+    }
+
+    for (int i = 0; i < LINHAS; i++)
+    {
+        for (int j = 0; j < COLUNAS; j++)
+        {
+            printf("%d ", C[i * COLUNAS + j]);
+        }
+        printf("\n");
+    }
+
+    shmctl(segA, IPC_RMID, NULL);
+    shmctl(segB, IPC_RMID, NULL);
+    shmctl(segC, IPC_RMID, NULL);
+    shmdt(A);
+    shmdt(B);
+    shmdt(C);
+
+    return 0;
+}
+-----------------------------------------------------
+COMPILACAO E EXECUCAO
+$ gcc -o lab2_1 lab2_1.c
+$ ./lab2_1
+-----------------------------------------------------
+RESULTADO
+0 0 0
+2 2 2
+4 4 4
+-----------------------------------------------------
+CONCLUSAO
+O programa aloca tres segmentos de memoria compartilhada com shmget()
+(matrizes A, B e C, representadas como vetores de LINHAS*COLUNAS posicoes) e
+anexa cada um ao espaco de enderecos do processo com shmat(). As matrizes A e
+B sao preenchidas pelo processo pai (A[i][j] = i+j e B[i][j] = i-j). Em
+seguida, o programa cria um processo filho por fork() para cada linha da
+matriz resultado: cada filho calcula apenas a sua linha de C = A + B e grava
+o resultado diretamente na memoria compartilhada, que e visivel para o pai
+porque todos os processos (pai e filhos, ja que a memoria compartilhada e
+herdada pelo filho no fork) estao mapeando a mesma regiao fisica de memoria.
+O pai aguarda todos os filhos com wait() antes de imprimir a matriz C, e ao
+final libera as tres areas com shmdt() (desanexa) e shmctl(..., IPC_RMID, ...)
+(remove o segmento do sistema). O resultado impresso confirma a soma correta:
+para i=0: 0+0=0, 1-1=0, 2-2=0 -> linha "0 0 0"; para i=1: 1+0=1+1=2 em cada
+coluna -> "2 2 2"; para i=2: 2+0=2, 3-... -> "4 4 4", validando que cada
+processo filho escreveu corretamente na posicao de memoria compartilhada
+correspondente a sua linha, sem que fosse necessario nenhum mecanismo de IPC
+alem da propria memoria compartilhada.
+-----------------------------------------------------
+
+
+QUESTAO 2) Mensagem do Dia
+
+Faca um programa que:
+- Leia uma mensagem do dia do stdin (ou arquivo)
+- Crie uma memoria compartilhada com a chave 8752
+- Salve a mensagem na memoria
+Faca um outro programa "cliente" que utilize a mesma chave (8752) e exiba a
+mensagem do dia para o usuario.
+-----------------------------------------------------
+LAB2_2A.C
+#include<stdio.h>
+#include<string.h>
+#include<stdlib.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+int main (void)
+{
+    char mensagem[100];
+    int segmento, pid;
+    char  *memoria;
+
+    printf("Digite sua mensagem do dia: ");
+    fgets(mensagem, sizeof(mensagem), stdin);
+
+    segmento = shmget(8752, sizeof(mensagem), IPC_CREAT | S_IRUSR | S_IWUSR | S_IROTH);
+    memoria = shmat(segmento, 0, 0);
+    if (memoria == (char *) -1)
+    {
+        perror("erro ao anexar a memoria compartilhada!");
+        exit(1);
+    }
+
+    strcpy(memoria, mensagem);
+
+    shmdt(memoria);
+
+    return 0;
+}
+-----------------------------------------------------
+LAB2_2B.C
+#include<stdio.h>
+#include<string.h>
+#include<stdlib.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+int main(void)
+{
+
+    int segmento;
+    char *memoria;
+
+    segmento = shmget(8752, 100 * sizeof(char), IPC_CREAT | S_IRUSR | S_IWUSR | S_IROTH);
+    memoria = shmat(segmento, 0, 0);
+    if (memoria == (char *) -1)
+    {
+        perror("erro ao anexar a memoria compartilhada!");
+        exit(1);
+    }
+
+    printf("Mensagem do dia no programa cliente: %s", memoria);
+
+    shmdt(memoria);
+
+    shmctl(segmento, IPC_RMID, 0);
+
+    return 0;
+}
+-----------------------------------------------------
+COMPILACAO E EXECUCAO
+$ gcc -o lab2_2a lab2_2a.c
+$ gcc -o lab2_2b lab2_2b.c
+$ ./lab2_2a
+Digite sua mensagem do dia: Bom dia, turma de Sistemas Operacionais!
+$ ./lab2_2b
+-----------------------------------------------------
+RESULTADO
+Digite sua mensagem do dia: Mensagem do dia no programa cliente: Bom dia, turma de Sistemas Operacionais!
+-----------------------------------------------------
+CONCLUSAO
+Diferente do exercicio 1, aqui os dois programas nao tem parentesco (nao ha
+fork entre eles): sao dois executaveis independentes que se comunicam por
+memoria compartilhada porque usam a mesma chave fixa (8752) na chamada
+shmget(), em vez de IPC_PRIVATE. Isso faz com que o kernel devolva o mesmo
+identificador de segmento (ou crie um novo caso ainda nao exista, gracas a
+flag IPC_CREAT) para qualquer processo que peca a chave 8752, permitindo que
+processos sem relacao de parentesco compartilhem a mesma area de memoria -
+diferente do fork, onde o compartilhamento vem da heranca do espaco de
+enderecos. O programa lab2_2a le a mensagem do stdin com fgets(), anexa o
+segmento de chave 8752 e copia a mensagem para dentro dele com strcpy(),
+depois desanexa (shmdt()) sem remover o segmento (para que ele continue
+existindo no sistema apos o processo terminar). O programa lab2_2b, executado
+depois e de forma totalmente independente, anexa o mesmo segmento (mesma
+chave) e consegue ler a mensagem gravada por lab2_2a, imprimindo-a na tela;
+em seguida ele desanexa e remove o segmento com IPC_RMID, liberando o
+recurso do sistema. O resultado confirma que a mensagem digitada em lab2_2a
+foi corretamente lida por lab2_2b.
+-----------------------------------------------------
+
+
+QUESTAO 3) Busca paralela em vetor
+
+Faca um programa paralelo (com pelo menos 4 processos) para localizar uma
+chave em um vetor.
+- Crie uma memoria compartilhada com dados numericos inteiros e desordenados
+  e a divida pelo numero de processos.
+- Cada processo deve procurar o dado na sua area de memoria e informar a
+  posicao onde o dado foi localizado.
+-----------------------------------------------------
+LAB2_3.C
+#include<stdio.h>
+#include<string.h>
+#include<stdlib.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include<time.h>
+
+#define N 20
+
+int main(void)
+{
+
+    int segmento, *memoria, chave;
+    int pids[4];
+
+    segmento = shmget(IPC_PRIVATE, sizeof(int) * N, IPC_CREAT | S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
+    memoria = shmat(segmento, 0, 0);
+    if (memoria == (int *) -1)
+    {
+        perror("erro ao anexar a memoria compartilhada!");
+        exit(1);
+    }
+
+    srand(time(NULL));
+    for (int i = 0; i < N; i++)
+    {
+        memoria[i] = rand() % 21;
+    }
+
+    printf("Escolha uma chave a ser encontrada (entre 0 e 20): ");
+    scanf("%d", &chave);
+
+    for (int i = 0; i < 4; i++)
+    {
+        pids[i] = fork();
+
+        if(pids[i] == 0)
+        {
+            int inicio = i * (N/4);
+            int fim = (i+1) * (N/4);
+            for (int j = inicio; j < fim; j++)
+            {
+                if (memoria[j] == chave)
+                {
+                    printf("Chave %d encontrada no processo %d na posicao %d\n", chave, getpid(), j);
+                }
+            }
+
+            exit(0);
+        }
+    }
+
+    waitpid(pids[0], NULL, 0);
+    waitpid(pids[1], NULL, 0);
+    waitpid(pids[2], NULL, 0);
+    waitpid(pids[3], NULL, 0);
+    shmctl(segmento, IPC_RMID, 0);
+    shmdt(memoria);
+
+    return 0;
+}
+-----------------------------------------------------
+COMPILACAO E EXECUCAO
+$ gcc -o lab2_3 lab2_3.c
+$ ./lab2_3
+Escolha uma chave a ser encontrada (entre 0 e 20): 15
+-----------------------------------------------------
+RESULTADO
+Escolha uma chave a ser encontrada (entre 0 e 20): Chave 15 encontrada no processo 120952 na posicao 2
+-----------------------------------------------------
+CONCLUSAO
+O programa aloca um unico segmento de memoria compartilhada com N=20 inteiros
+e o preenche com valores aleatorios entre 0 e 20 (vetor desordenado). Apos o
+usuario informar a chave a ser buscada, sao criados 4 processos filhos por
+fork(), e cada um deles calcula a sua propria faixa de indices do vetor
+(N/4 = 5 posicoes por processo) para pesquisar, sem que nenhuma faixa se
+sobreponha. Como o vetor esta em memoria compartilhada, todos os filhos
+enxergam o mesmo conteudo preenchido pelo pai antes do fork, sem necessidade
+de copiar os dados. Cada filho que encontra a chave na sua faixa imprime o
+proprio PID (getpid()) e a posicao no vetor; o processo pai aguarda os 4
+filhos com waitpid() antes de remover a memoria compartilhada. Como os
+valores sao gerados aleatoriamente a cada execucao, o numero de ocorrencias
+da chave escolhida (e portanto de linhas de resultado) varia entre execucoes,
+podendo ser zero, uma ou mais - no resultado mostrado a chave 15 apareceu uma
+unica vez, na posicao 2, dentro da faixa do processo correspondente. Isso
+demonstra o paralelismo: a busca de todo o vetor foi dividida entre 4
+processos independentes que trabalham simultaneamente sobre a mesma memoria
+compartilhada.
+-----------------------------------------------------
+
+
+QUESTAO 4) Multiplicacao multi-processo
+
+Faca um programa que:
+- Tenha um processo pai que abre dois blocos de memoria compartilhada, m1 e
+  m2.
+- Crie dois processos filho (use exec), P1 e P2: estes tambem fazem attach em
+  m1 ou m2 respectivamente.
+- Cada um da um sleep() randomico e escreve um valor int na area
+  compartilhada dele, e avisa o processo pai que um novo valor foi gerado,
+  escrevendo tambem um numero de sequencia.
+- O pai fica em loop verificando se houve um novo valor. Apenas quando ambos
+  P1 e P2 geraram um novo valor, o pai imprime o produto dos valores gerados
+  por P1 e P2.
+-----------------------------------------------------
+LAB2_4A.C
+#include<stdio.h>
+#include<string.h>
+#include<stdlib.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+
+int main(void)
+{
+
+    int pid1, pid2, *m1, *m2, segmento1, segmento2, seq1, seq2;
+    char buf1[12], buf2[12];
+    int resultado;
+
+    segmento1 = shmget(IPC_PRIVATE, sizeof(int) * 2, IPC_CREAT | S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
+    segmento2 = shmget(IPC_PRIVATE, sizeof(int) * 2, IPC_CREAT | S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
+    m1 = shmat(segmento1, 0, 0);
+    m2 = shmat(segmento2, 0, 0);
+    if (m1 == (int *) -1 || m2 == (int *) -1)
+    {
+        perror("Erro ao anexar o segmento de memoria compartilhada");
+        exit(1);
+    }
+
+    sprintf(buf1, "%d", segmento1);
+    sprintf(buf2, "%d", segmento2);
+
+    pid1 = fork();
+    if (pid1 == 0)
+    {
+        execl("./lab2_4b", "lab2_4b", buf1, NULL);
+        perror("Erro na execucao do filho 1");
+        exit(1);
+    }
+
+    pid2 = fork();
+    if (pid2 == 0)
+    {
+        execl("./lab2_4c", "lab2_4c", buf2, NULL);
+        perror("Erro na execucao do filho 2");
+        exit(1);
+    }
+
+    seq1 = 0;
+    seq2 = 0;
+    while(seq1 == 0 || seq2 == 0)
+    {
+        if(m1[1] != 0)
+        {
+            seq1 = m1[1];
+        }
+        if(m2[1] != 0)
+        {
+            seq2 = m2[1];
+        }
+    }
+
+    resultado = m1[0] * m2[0];
+    printf("Resultado: %d\n", resultado);
+
+    shmctl(segmento1, IPC_RMID, NULL);
+    shmctl(segmento2, IPC_RMID, NULL);
+    shmdt(m1);
+    shmdt(m2);
+
+    return 0;
+}
+-----------------------------------------------------
+LAB2_4B.C
+#include<stdio.h>
+#include<string.h>
+#include<stdlib.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include<time.h>
+
+// Esse aqui e o P1
+int main(int argc, char *argv[])
+{
+    srand(getpid());
+    int x = rand() % 11;
+    int *m1;
+
+    m1 = shmat(atoi(argv[1]), 0, 0);
+    if (m1 == (int *) -1)
+    {
+        perror("Erro ao anexar o segmento de memoria compartilhada");
+        exit(1);
+    }
+
+    sleep(x);
+
+    m1[0] = x;
+    m1[1]++;
+
+}
+-----------------------------------------------------
+LAB2_4C.C
+#include<stdio.h>
+#include<string.h>
+#include<stdlib.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include<time.h>
+
+// Esse aqui e o P2!
+int main(int argc, char *argv[])
+{
+    srand(getpid());
+    int y = rand() % 11;
+    int *m2;
+
+    m2 = shmat(atoi(argv[1]), 0, 0);
+    if (m2 == (int *) -1)
+    {
+        perror("Erro ao anexar o segmento de memoria compartilhada");
+        exit(1);
+    }
+
+    sleep(y);
+
+    m2[0] = y;
+    m2[1]++;
+
+}
+-----------------------------------------------------
+COMPILACAO E EXECUCAO
+$ gcc -o lab2_4a lab2_4a.c
+$ gcc -o lab2_4b lab2_4b.c
+$ gcc -o lab2_4c lab2_4c.c
+$ ./lab2_4a
+-----------------------------------------------------
+RESULTADO
+Resultado: 12
+-----------------------------------------------------
+CONCLUSAO
+O processo pai (lab2_4a) cria dois segmentos de memoria compartilhada
+independentes, m1 e m2, cada um com espaco para 2 inteiros: a posicao 0
+guarda o valor gerado pelo filho, e a posicao 1 funciona como numero de
+sequencia (contador que indica se um novo valor ja foi escrito). O pai
+converte os identificadores dos segmentos (retornados por shmget()) em
+strings e os passa como argumento na chamada de execl(), que substitui a
+imagem do processo filho (apos o fork()) pelos executaveis lab2_4b (P1) e
+lab2_4c (P2). Como o identificador do segmento (obtido antes do fork/exec) e
+passado por argv, P1 e P2 conseguem fazer shmat() no mesmo segmento que o
+pai criou, mesmo apos o exec() ter trocado completamente a imagem de memoria
+do processo (o que apagaria qualquer ponteiro herdado do pai, mas nao o
+identificador numerico do IPC, que continua valido no kernel). Cada filho
+dorme um tempo aleatorio com sleep(), gera um valor aleatorio entre 0 e 10 e
+grava esse valor e incrementa o numero de sequencia da sua area. O processo
+pai fica em busy-wait, checando continuamente m1[1] e m2[1] ate que ambos
+sejam diferentes de zero, ou seja, ate que P1 e P2 tenham escrito seus
+valores; so entao ele calcula e imprime o produto m1[0]*m2[0]. O resultado
+12 corresponde ao produto dos valores aleatorios sorteados por P1 e P2
+nessa execucao (por exemplo, 3*4, 2*6, 6*2, etc., ja que ambos sorteiam
+entre 0 e 10). Como os valores sao aleatorios a cada execucao, o resultado
+impresso varia entre 0 e 100 a cada vez que o programa e executado.
+-----------------------------------------------------
