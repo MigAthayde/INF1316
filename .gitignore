@@ -1,0 +1,16 @@
+# Object files
+*.o
+*.obj
+
+# Executables (compiled binaries with no extension, common on Linux)
+*.out
+*.exe
+*.a
+*.so
+*.bin
+
+# Your binaries (lab1, alo, lab2_1, ctrlc, ...) compile with no extension.
+# Ignore any file with no extension, but keep directories.
+*
+!*.*
+!*/
