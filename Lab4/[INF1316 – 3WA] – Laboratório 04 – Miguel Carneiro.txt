@@ -1,0 +1,333 @@
+MIGUEL DE ATHAYDE CARNEIRO - 2211816
+
+QUESTÃO 5) Faça um programa que leia 2 números e imprima o resultado das 4 operações básicas sobre estes 2 números. Verifique o que acontece se o 2º. número da entrada for 0 (zero). Capture o sinal de erro de floating point (SIGFPE) e repita a experiência anterior.
+-----------------------------------------------------
+EX5.C
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <signal.h>
+#include <sys/wait.h>
+
+int soma(int x, int y);
+int subtracao(int x, int y);
+int multiplicacao(int x, int y);
+int divisao(int x, int y);
+void signalHandler(int sig);
+
+int main(void)
+{
+    int x, y;
+    signal(SIGFPE, signalHandler);
+
+    printf("Digite o primeiro número: ");
+    scanf("%d", &x);
+    printf("Digite o segundo número: ");
+    scanf("%d", &y);
+
+    printf("Soma: %d\n", soma(x, y));
+    printf("Subtração: %d\n", subtracao(x, y));
+    printf("Multiplicação: %d\n", multiplicacao(x, y));
+    printf("Divisão: %d\n", divisao(x, y));
+
+    return 0;
+}
+
+int soma(int x, int y)
+{
+    return x + y;
+}
+
+int subtracao(int x, int y)
+{
+    return x - y;
+}
+
+int multiplicacao(int x, int y)
+{
+    return x * y;
+}
+
+int divisao(int x, int y)
+{
+    return x / y;
+}
+
+void signalHandler(int sig)
+{
+    if (sig == SIGFPE)
+    {
+        printf("Erro: divisão por zero!\n");
+        exit(1);
+    }
+}
+-----------------------------------------------------
+COMPILAÇÃO E EXECUÇÃO
+$ gcc -o ex5 ex5.c
+$ ./ex5
+(entrada: 10 e 2, depois 10 e 0)
+-----------------------------------------------------
+RESULTADO
+Digite o primeiro número: 10
+Digite o segundo número: 2
+Soma: 12
+Subtração: 8
+Multiplicação: 20
+Divisão: 5
+
+Digite o primeiro número: 10
+Digite o segundo número: 0
+Soma: 10
+Subtração: 10
+Multiplicação: 0
+Erro: divisão por zero!
+
+(comentando a linha signal(SIGFPE, signalHandler) e repetindo a entrada 10 e 0)
+Digite o primeiro número: 10
+Digite o segundo número: 0
+Soma: 10
+Subtração: 10
+Multiplicação: 0
+Exceção de ponto flutuante (imagem do núcleo gravada)
+-----------------------------------------------------
+CONCLUSÃO
+Sem o tratamento do sinal, a divisão inteira por zero faz o processador gerar uma exceção que o kernel converte no sinal SIGFPE, cuja ação padrão é Core: o processo é encerrado imediatamente na chamada divisao(x, y), sem chegar a imprimir o resultado da divisão. Ao instalar o handler com signal(SIGFPE, signalHandler) antes das operações, o próprio processo passa a tratar o sinal: a função signalHandler imprime a mensagem de erro e chama exit(1), encerrando o programa de forma controlada em vez de ser derrubado pelo sistema operacional. Nos dois casos o processo termina, mas a diferença é que, com o handler, quem decide o que fazer e como terminar é o programador, e não mais o comportamento padrão do SO.
+-----------------------------------------------------
+
+QUESTÃO 6) Faça um programa para monitorar e informar o preço de chamadas telefônicas. O programa deverá ser executado em background. O início e o término de uma chamada são informados através dos sinais SIGUSR1 e SIGUSR2, respectivamente. O custo da ligação é de 2 centavos por segundo, para ligações de até 1 minuto ou de 1 centavo por segundo a partir do 2º. minuto, ou seja, uma ligação de 1m30s custa R$1,50.
+-----------------------------------------------------
+EX6.C
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <signal.h>
+
+volatile int segundos = 0;
+volatile int emLigacao = 0;
+
+void handlerAlarm(int sig)
+{
+    if (emLigacao)
+    {
+        segundos++;
+        alarm(1);
+    }
+}
+
+void handlerUSR1(int sig)
+{
+    segundos = 0;
+    emLigacao = 1;
+    alarm(1);
+    printf("Chamada iniciada (PID %d)\n", getpid());
+    fflush(stdout);
+}
+
+void handlerUSR2(int sig)
+{
+    float custo;
+
+    if (!emLigacao)
+    {
+        printf("Nenhuma chamada em andamento\n");
+        fflush(stdout);
+        return;
+    }
+
+    emLigacao = 0;
+    alarm(0);
+
+    if (segundos <= 60)
+        custo = segundos * 0.02;
+    else
+        custo = 60 * 0.02 + (segundos - 60) * 0.01;
+
+    printf("Chamada encerrada: %d segundo(s), custo R$ %.2f\n", segundos, custo);
+    fflush(stdout);
+}
+
+int main(void)
+{
+    signal(SIGUSR1, handlerUSR1);
+    signal(SIGUSR2, handlerUSR2);
+    signal(SIGALRM, handlerAlarm);
+
+    printf("Monitor de chamadas iniciado (PID %d)\n", getpid());
+    fflush(stdout);
+
+    while (1)
+        pause();
+
+    return 0;
+}
+-----------------------------------------------------
+COMPILAÇÃO E EXECUÇÃO
+$ gcc -o ex6 ex6.c
+$ ./ex6 &
+$ kill -s SIGUSR1 <pid>
+(aguardar alguns segundos)
+$ kill -s SIGUSR2 <pid>
+-----------------------------------------------------
+RESULTADO
+Teste 1 (chamada de 3 segundos):
+Monitor de chamadas iniciado (PID 41603)
+Chamada iniciada (PID 41603)
+Chamada encerrada: 3 segundo(s), custo R$ 0.06
+
+Teste 2 (chamada de aproximadamente 1m30s):
+Monitor de chamadas iniciado (PID 41603)
+Chamada iniciada (PID 41603)
+Chamada encerrada: 89 segundo(s), custo R$ 1.49
+-----------------------------------------------------
+CONCLUSÃO
+O programa fica em background bloqueado em pause(), que só retorna quando um sinal chega. O sinal SIGUSR1 marca o início da chamada: zera o contador de segundos, liga a flag emLigacao e arma um alarm(1). A cada segundo o SIGALRM incrementa o contador e reagenda o próprio alarme, funcionando como um cronômetro. O SIGUSR2 marca o fim da chamada: desarma o alarme e calcula o custo, cobrando 2 centavos por segundo até o primeiro minuto e 1 centavo por segundo a partir do segundo minuto, exatamente como pedido no enunciado (uma chamada de 90 segundos resulta em R$1,50). No teste 2 o resultado deu R$1,49 para 89 segundos por causa da imprecisão do sleep usado para simular a duração da ligação no teste, mas a fórmula usada confere com o exemplo do enunciado quando a chamada dura exatamente 90 segundos.
+-----------------------------------------------------
+
+QUESTÃO 7) Elabore três programas I/O bound que não terminem (loop de msgs no vídeo). Elabore um programa que seja capaz de executar os 3 programas indicados anteriormente e que simule o compartilhamento da CPU entre os 3 processos com escalonamento Round-Robin com uma fatia de tempo de 1 segundo para o primeiro processo e de 2 segundos para os demais processos. Execute os programas e relate o que aconteceu.
+-----------------------------------------------------
+PROG1.C
+#include <stdio.h>
+#include <unistd.h>
+
+int main(void)
+{
+    while(1)
+    {
+        printf("Processo 1 rodando...\n");
+        sleep(1);
+    }
+
+    return 0;
+}
+-----------------------------------------------------
+PROG2.C
+#include <stdio.h>
+#include <unistd.h>
+
+int main(void)
+{
+    while(1)
+    {
+        printf("Processo 2 rodando...\n");
+        sleep(1);
+    }
+
+    return 0;
+}
+-----------------------------------------------------
+PROG3.C
+#include <stdio.h>
+#include <unistd.h>
+
+int main(void)
+{
+    while(1)
+    {
+        printf("Processo 3 rodando...\n");
+        sleep(1);
+    }
+
+    return 0;
+}
+-----------------------------------------------------
+EX7.C
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <signal.h>
+
+int main(void)
+{
+
+    int pid1, pid2, pid3;
+    pid1 = fork();
+    if (pid1 < 0)
+    {
+        perror("Erro ao criar o processo 1");
+        exit(1);
+    }
+    else if (pid1 == 0)
+    {
+        execl("./prog1", "prog1", NULL);
+        perror("Erro ao executar o processo 1");
+        exit(1);
+    }
+
+    pid2 = fork();
+    if (pid2 < 0)
+    {
+        perror("Erro ao criar o processo 2");
+        exit(1);
+    }
+    else if (pid2 == 0)
+    {
+        execl("./prog2", "prog2", NULL);
+        perror("Erro ao executar o processo 2");
+        exit(1);
+    }
+
+    pid3 = fork();
+    if (pid3 < 0)
+    {
+        perror("Erro ao criar o processo 3");
+        exit(1);
+    }
+    else if (pid3 == 0)
+    {
+        execl("./prog3", "prog3", NULL);
+        perror("Erro ao executar o processo 3");
+        exit(1);
+    }
+
+    kill(pid2, SIGSTOP);
+    kill(pid3, SIGSTOP);
+    while(1)
+    {
+        sleep(1);
+        printf("Pai> Pausando o processo 1 e retomando o processo 2\n");
+        kill(pid1, SIGSTOP);
+        kill(pid2, SIGCONT);
+
+        sleep(2);
+        printf("Pai> Pausando o processo 2 e retomando o processo 3\n");
+        kill(pid2, SIGSTOP);
+        kill(pid3, SIGCONT);
+
+        sleep(2);
+        printf("Pai> Pausando o processo 3 e retomando o processo 1\n");
+        kill(pid3, SIGSTOP);
+        kill(pid1, SIGCONT);
+    }
+
+    return 0;
+}
+-----------------------------------------------------
+COMPILAÇÃO E EXECUÇÃO
+$ gcc -o prog1 prog1.c
+$ gcc -o prog2 prog2.c
+$ gcc -o prog3 prog3.c
+$ gcc -o ex7 ex7.c
+$ ./ex7
+(interrompido com Ctrl-C após alguns ciclos, pois o pai roda em loop infinito)
+-----------------------------------------------------
+RESULTADO
+Processo 1 rodando...
+Pai> Pausando o processo 1 e retomando o processo 2
+Processo 2 rodando...
+Processo 2 rodando...
+Pai> Pausando o processo 2 e retomando o processo 3
+Processo 3 rodando...
+Processo 3 rodando...
+Pai> Pausando o processo 3 e retomando o processo 1
+Processo 1 rodando...
+Pai> Pausando o processo 1 e retomando o processo 2
+Processo 2 rodando...
+Processo 2 rodando...
+Pai> Pausando o processo 2 e retomando o processo 3
+Processo 3 rodando...
+Processo 3 rodando...
+Pai> Pausando o processo 3 e retomando o processo 1
+-----------------------------------------------------
+CONCLUSÃO
+O processo pai cria os três filhos com fork()+execl() e usa SIGSTOP/SIGCONT para dar a cada um a impressão de estar rodando sozinho na CPU, quando na verdade só um deles está ativo por vez. O pai libera o processo 1 por 1 segundo e, em seguida, alterna entre os processos 2 e 3 dando 2 segundos para cada um, repetindo esse ciclo indefinidamente. Como cada programa-filho imprime uma mensagem e dorme 1 segundo, dá para ver pelo resultado que o processo 1 imprime só uma vez por fatia (fatia de 1s) enquanto os processos 2 e 3 imprimem duas vezes por fatia (fatia de 2s), confirmando que o escalonamento Round-Robin com fatias diferentes por processo foi respeitado.
+-----------------------------------------------------
